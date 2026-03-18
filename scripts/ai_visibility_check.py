@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-AI Visibility Check v2 — audyt widoczności marki w modelach AI
-Odpytuje wiele modeli równolegle przez OpenRouter API.
-Wersja 2: pełne odpowiedzi, kontekst cytatów, sentiment, pozycja wzmianki.
+AI Visibility Check v2 — audit brand visibility across AI models (GEO/AEO)
+Queries multiple models in parallel via OpenRouter API.
+Version 2: full responses, mention context, sentiment analysis, position scoring.
 
-Użycie:
-    python3 ai_visibility_check.py --brand "nazwa" --domain "domena.pl"
-    python3 ai_visibility_check.py --brand "nazwa" --domain "domena.pl" --lang pl
-    python3 ai_visibility_check.py --brand "nazwa" --domain "domena.pl" \
-        --prompts "pytanie 1" "pytanie 2"
+Usage:
+    python3 ai_visibility_check.py --brand "name" --domain "domain.com"
+    python3 ai_visibility_check.py --brand "name" --domain "domain.com" --lang en
+    python3 ai_visibility_check.py --brand "name" --domain "domain.com" \
+        --prompts "question 1" "question 2"
 """
 
 import os
@@ -23,12 +23,12 @@ from typing import Optional
 try:
     from openai import AsyncOpenAI
 except ImportError:
-    print("ERROR: Brak biblioteki openai. Zainstaluj: pip install openai")
+    print("ERROR: Missing library openai. Install: pip install openai")
     sys.exit(1)
 
 
 # ─────────────────────────────────────────────
-# KONFIGURACJA MODELI
+# MODEL CONFIGURATION
 # ─────────────────────────────────────────────
 
 MODELS = [
@@ -51,10 +51,10 @@ NO_ONLINE_SUFFIX = {
 
 
 # ─────────────────────────────────────────────
-# DOMYŚLNE PYTANIA
+# DEFAULT PROMPTS
 # ─────────────────────────────────────────────
 
-DEFAULT_PROMPTS_PL = [
+DEFAULT_PROMPTS_PL = [  # Polish default prompts (used with --lang pl)
     "Jakie są najlepsze agencje marketingu cyfrowego w Polsce?",
     "Polecane agencje Google Ads dla firm B2B",
     "Najlepsze agencje SEO w Polsce 2025",
@@ -72,11 +72,11 @@ DEFAULT_PROMPTS_EN = [
 
 
 # ─────────────────────────────────────────────
-# SENTIMENT (rule-based, zero kosztów)
+# SENTIMENT (rule-based, zero cost)
 # ─────────────────────────────────────────────
 
 POSITIVE_WORDS = [
-    "poleca", "polecam", "najlepsz", "świetn", "doskonał", "wyróżnia", "lider",
+    "poleca", "polecam", "najlepsz", "świetn", "doskonał", "wyróżnia", "lider",  # Polish
     "ekspert", "zaufan", "skuteczn", "profesjonaln", "renomowa", "award",
     "top", "best", "leading", "excellent", "recommended", "trusted", "proven",
     "specialist", "premier", "award-winning", "outstanding", "innovative",
@@ -89,10 +89,10 @@ NEGATIVE_WORDS = [
 ]
 
 def analyze_sentiment(text: str, keywords: list[str]) -> str:
-    """Prosty sentiment: szukamy pozytywnych/negatywnych słów w otoczeniu keyword."""
+    """Simple sentiment: find positive/negative words around keyword mentions."""
     text_lower = text.lower()
 
-    # Znajdź zdania zawierające keyword
+    # Find sentences containing keyword
     sentences = re.split(r'(?<=[.!?])\s+', text)
     relevant_sentences = []
     for sent in sentences:
@@ -101,32 +101,32 @@ def analyze_sentiment(text: str, keywords: list[str]) -> str:
             relevant_sentences.append(sent_lower)
 
     if not relevant_sentences:
-        return "neutralny"
+        return "neutral"
 
     context = " ".join(relevant_sentences)
     pos = sum(1 for w in POSITIVE_WORDS if w in context)
     neg = sum(1 for w in NEGATIVE_WORDS if w in context)
 
     if pos > neg:
-        return "pozytywny"
+        return "positive"
     elif neg > pos:
-        return "negatywny"
+        return "negative"
     else:
-        return "neutralny"
+        return "neutral"
 
 
 def sentiment_emoji(sentiment: str) -> str:
-    return {"pozytywny": "😊", "negatywny": "😟", "neutralny": "😐"}.get(sentiment, "😐")
+    return {"positive": "😊", "negative": "😟", "neutral": "😐"}.get(sentiment, "😐")
 
 
 # ─────────────────────────────────────────────
-# WYCIĄGANIE KONTEKSTU WZMIANKI
+# MENTION CONTEXT EXTRACTION
 # ─────────────────────────────────────────────
 
 def extract_mention_contexts(content: str, keywords: list[str], context_sentences: int = 2) -> list[dict]:
     """
-    Dla każdego keyword zwróć wszystkie wystąpienia z otaczającymi zdaniami.
-    Zwraca listę dict: {keyword, excerpt, sentence_index, total_sentences}
+    For each keyword return all occurrences with surrounding sentences.
+    Returns list of dict: {keyword, excerpt, sentence_index, total_sentences}
     """
     sentences = re.split(r'(?<=[.!?\n])\s+', content.strip())
     sentences = [s.strip() for s in sentences if s.strip()]
@@ -152,7 +152,7 @@ def extract_mention_contexts(content: str, keywords: list[str], context_sentence
 
 
 def check_mentions(content: str, keywords: list[str]) -> dict:
-    """Sprawdź ile razy i gdzie pojawiają się keywords + konteksty."""
+    """Check how many times and where keywords appear, including context."""
     content_lower = content.lower()
     results = {}
     for kw in keywords:
@@ -190,7 +190,7 @@ def check_citations(annotations: list, domains: list[str]) -> list[dict]:
 
 
 # ─────────────────────────────────────────────
-# ZAPYTANIE DO MODELU
+# MODEL QUERY
 # ─────────────────────────────────────────────
 
 async def query_model(
@@ -209,7 +209,7 @@ async def query_model(
         "content": "",
         "mentions": {},
         "mention_contexts": [],
-        "sentiment": "neutralny",
+        "sentiment": "neutral",
         "citations": [],
         "error": None,
         "tokens": 0,
@@ -228,7 +228,7 @@ async def query_model(
             )
 
             content = completion.choices[0].message.content or ""
-            result["content"] = content  # pełny tekst, bez obcinania
+            result["content"] = content  # full text, no truncation
             result["success"] = True
             result["tokens"] = (
                 completion.usage.total_tokens if completion.usage else 0
@@ -236,7 +236,7 @@ async def query_model(
 
             result["mentions"] = check_mentions(content, keywords)
 
-            # Konteksty wszystkich wzmianek (płasko)
+            # All mention contexts (flat list)
             all_contexts = []
             for kw_data in result["mentions"].values():
                 all_contexts.extend(kw_data.get("contexts", []))
@@ -278,8 +278,8 @@ def compute_model_score(results_for_model: list[dict], keywords: list[str]) -> d
 
     # Sentiment summary
     sentiments = [r["sentiment"] for r in successful if r["mentions"]]
-    pos_count = sentiments.count("pozytywny")
-    neg_count = sentiments.count("negatywny")
+    pos_count = sentiments.count("positive")
+    neg_count = sentiments.count("negative")
 
     mention_rate = with_mention / len(successful)
     citation_rate = with_citation / len(successful)
@@ -310,17 +310,17 @@ def compute_model_score(results_for_model: list[dict], keywords: list[str]) -> d
 
 def score_to_status(score: float) -> str:
     if score >= 80:
-        return "🟢 Silna"
+        return "🟢 Strong"
     elif score >= 50:
-        return "🟡 Umiarkowana"
+        return "🟡 Moderate"
     elif score >= 20:
-        return "🟠 Słaba"
+        return "🟠 Weak"
     else:
-        return "🔴 Niewidoczna"
+        return "🔴 Invisible"
 
 
 # ─────────────────────────────────────────────
-# GENEROWANIE RAPORTU MARKDOWN
+# MARKDOWN REPORT GENERATION
 # ─────────────────────────────────────────────
 
 def generate_report(
@@ -338,22 +338,22 @@ def generate_report(
     lines += [
         f"# Raport AI Visibility — {brand}",
         f"",
-        f"**Data:** {run_date}  ",
-        f"**Domena:** {domain}  ",
+        f"**Date:** {run_date}  ",
+        f"**Domain:** {domain}  ",
         f"**Keywords:** {', '.join(keywords)}  ",
-        f"**Modele:** {len(model_scores)}  ",
-        f"**Pytania:** {len(prompts)}  ",
+        f"**Models:** {len(model_scores)}  ",
+        f"**Prompts:** {len(prompts)}  ",
         f"",
     ]
 
     all_scores = [v["score"] for v in model_scores.values()]
     overall = round(sum(all_scores) / len(all_scores), 1) if all_scores else 0
 
-    # Globalny sentiment
+    # Global sentiment
     all_sentiments = [r["sentiment"] for r in all_results if r["success"] and r["mentions"]]
     total_s = len(all_sentiments)
-    pos_pct = round(all_sentiments.count("pozytywny") / total_s * 100) if total_s else 0
-    neg_pct = round(all_sentiments.count("negatywny") / total_s * 100) if total_s else 0
+    pos_pct = round(all_sentiments.count("positive") / total_s * 100) if total_s else 0
+    neg_pct = round(all_sentiments.count("negative") / total_s * 100) if total_s else 0
     neu_pct = 100 - pos_pct - neg_pct
 
     lines += [
@@ -364,26 +364,26 @@ def generate_report(
     ]
 
     if overall >= 80:
-        lines.append(f"Marka **{brand}** jest dobrze widoczna w ekosystemie AI.")
+        lines.append(f"Brand **{brand}** has strong visibility across the AI ecosystem.")
     elif overall >= 50:
-        lines.append(f"Marka **{brand}** ma umiarkowaną widoczność — pojawia się w części odpowiedzi.")
+        lines.append(f"Brand **{brand}** has moderate visibility — appears in some responses but lacks dominance.")
     elif overall >= 20:
-        lines.append(f"Marka **{brand}** jest słabo widoczna w AI. Wymagana strategia GEO.")
+        lines.append(f"Brand **{brand}** has weak AI visibility. An active GEO strategy is required.")
     else:
-        lines.append(f"Marka **{brand}** praktycznie nie istnieje w odpowiedziach modeli AI.")
+        lines.append(f"Brand **{brand}** is virtually absent from AI model responses. Critical GEO intervention needed.")
 
     if total_s > 0:
         lines += [
             f"",
-            f"**Sentiment wzmianek:** 😊 {pos_pct}% pozytywny · 😐 {neu_pct}% neutralny · 😟 {neg_pct}% negatywny  ",
-            f"*(na podstawie {total_s} odpowiedzi z wzmianką)*",
+            f"**Mention sentiment:** 😊 {pos_pct}% positive · 😐 {neu_pct}% neutral · 😟 {neg_pct}% negative  ",
+            f"*(based on {total_s} responses with mentions)*",
         ]
 
     lines.append("")
 
-    # Tabela wyników per model
+    # Results table per model
     lines += [
-        f"## Wyniki per model",
+        f"## Results per model",
         f"",
         f"| Model | Score | Status | Mention Rate | Citation Rate | Avg Mentions | Sentiment |",
         f"|---|---|---|---|---|---|---|",
@@ -400,11 +400,11 @@ def generate_report(
         )
     lines.append("")
 
-    # Tabela wyników per prompt
+    # Results table per prompt
     lines += [
-        f"## Wyniki per pytanie",
+        f"## Results per prompt",
         f"",
-        f"| Pytanie | Modele z wzmianką | Modele z cytowaniem | Sentiment |",
+        f"| Prompt | Models with mention | Models with citation | Sentiment |",
         f"|---|---|---|---|",
     ]
     for prompt in prompts:
@@ -422,11 +422,11 @@ def generate_report(
         lines.append(f"| {prompt_short} | {with_m}/{total_m} | {with_c}/{total_m} | {sent_str} |")
     lines.append("")
 
-    # ── SEKCJA GŁÓWNA: pełne odpowiedzi per model ──────────────────────────
+    # ── MAIN SECTION: full responses per model ─────────────────────────
     lines += [
-        f"## Pełne odpowiedzi modeli",
+        f"## Full model responses",
         f"",
-        f"> Poniżej wszystkie odpowiedzi z wzmiankami. Konteksty cytatów wyróżnione.",
+        f"> All responses with brand mentions. Excerpt context highlighted.",
         f"",
     ]
 
@@ -444,20 +444,20 @@ def generate_report(
 
         for r in model_results:
             has_mention = bool(r["mentions"])
-            sentiment = r.get("sentiment", "neutralny")
+            sentiment = r.get("sentiment", "neutral")
             prompt_short = r["prompt"][:80]
 
             lines += [
-                f"**Pytanie:** {prompt_short}  ",
-                f"**Wzmianka:** {'✅ TAK' if has_mention else '❌ NIE'} | "
-                f"**Cytat URL:** {'✅ TAK' if r['citations'] else '❌ NIE'} | "
+                f"**Prompt:** {prompt_short}  ",
+                f"**Mention:** {'✅ YES' if has_mention else '❌ NO'} | "
+                f"**URL citation:** {'✅ YES' if r['citations'] else '❌ NO'} | "
                 f"**Sentiment:** {sentiment_emoji(sentiment)} {sentiment}",
                 f"",
             ]
 
-            # Konteksty wzmianek (wszystkie wystąpienia)
+            # Mention contexts (all occurrences)
             if r["mention_contexts"]:
-                lines.append(f"**Cytaty z odpowiedzi** *(kontekst {2} zdań przed/po)*:")
+                lines.append(f"**Mention excerpts** *(±2 sentence context)*:")
                 lines.append("")
                 for ctx in r["mention_contexts"]:
                     pos_label = f"pozycja ~{ctx['position_pct']}% tekstu"
@@ -467,10 +467,10 @@ def generate_report(
                         f"",
                     ]
 
-            # Pełna odpowiedź (zwinięta przez HTML details)
+            # Full response (collapsed via HTML details)
             lines += [
                 f"<details>",
-                f"<summary>📄 Pełna odpowiedź ({len(r['content'])} znaków)</summary>",
+                f"<summary>📄 Full response ({len(r['content'])} characters)</summary>",
                 f"",
                 f"```",
                 r["content"],
@@ -482,7 +482,7 @@ def generate_report(
 
             # Cytowane URL-e
             if r["citations"]:
-                lines.append(f"**Cytowane URL-e:**")
+                lines.append(f"**Cited URLs:**")
                 for c in r["citations"]:
                     lines.append(f"- {c['url']}")
                 lines.append("")
@@ -490,7 +490,7 @@ def generate_report(
             lines.append("---")
             lines.append("")
 
-    # Najczęstsze cytowania
+    # Most cited URLs
     all_citations = []
     for r in all_results:
         for c in r.get("citations", []):
@@ -499,15 +499,15 @@ def generate_report(
     if all_citations:
         from collections import Counter
         top_urls = Counter(all_citations).most_common(10)
-        lines += [f"## Najczęściej cytowane URL-e", f""]
+        lines += [f"## Most cited URLs", f""]
         for url, count in top_urls:
             lines.append(f"- `{url}` ({count}x)")
         lines.append("")
 
-    # Błędy
+    # Errors
     failed = [r for r in all_results if not r["success"]]
     if failed:
-        lines += [f"## Błędy (modele niedostępne)", f""]
+        lines += [f"## Errors (unavailable models)", f""]
         errors_by_model: dict = {}
         for r in failed:
             errors_by_model.setdefault(r["model"], r["error"])
@@ -515,29 +515,29 @@ def generate_report(
             lines.append(f"- `{model}`: {err}")
         lines.append("")
 
-    # Rekomendacje GEO
-    lines += [f"## Rekomendacje GEO", f""]
+    # GEO Recommendations
+    lines += [f"## GEO Recommendations", f""]
 
     if overall < 50:
         lines += [
-            f"### 🔴 Pilne działania",
+            f"### 🔴 Urgent actions",
             f"",
-            f"1. **Treści odpowiadające na pytania** — content bezpośrednio pod pytania, które modele AI dostają",
-            f"2. **Wikipedia / Wikidata** — jedno z najczęściej cytowanych źródeł przez LLM",
-            f"3. **LinkedIn / firmowe profile** — wiarygodne źródła indeksowane przez modele",
-            f"4. **Recenzje i case studies** — G2, Clutch, Trustpilot",
+            f"1. **Answer-focused content** — create content that directly answers questions AI models receive from users",
+            f"2. **Wikipedia / Wikidata** — one of the most cited sources by LLMs",
+            f"3. **LinkedIn / company profiles** — trusted sources indexed by AI models",
+            f"4. **Reviews and case studies** — G2, Clutch, Trustpilot",
             f"5. **Schema markup** — FAQPage, Organization, breadcrumbs",
             f"",
         ]
     else:
         lines += [
-            f"### 🟡 Optymalizacja",
+            f"### 🟡 Optimization",
             f"",
-            f"1. **Zwiększ pokrycie tematyczne** — odpowiadaj na pytania gdzie jeszcze nie ma wzmianki",
-            f"2. **Buduj cytowania** — publikuj dane, statystyki, raporty branżowe",
-            f"3. **Reddit / Quora / fora** — autentyczne zaangażowanie w dyskusje",
-            f"4. **robots.txt** — sprawdź czy nie blokujesz GPTBot/ClaudeBot/PerplexityBot",
-            f"5. **Monitoring miesięczny** — uruchamiaj audyt regularnie",
+            f"1. **Expand topic coverage** — target queries where your brand has no mentions yet",
+            f"2. **Build citations** — publish data, statistics, and industry reports",
+            f"3. **Reddit / Quora / forums** — authentic engagement in niche discussions",
+            f"4. **robots.txt** — ensure you are not blocking GPTBot/ClaudeBot/PerplexityBot",
+            f"5. **Monthly monitoring** — run audits regularly to track progress",
             f"",
         ]
 
@@ -546,33 +546,33 @@ def generate_report(
 
     if best_model_entry and worst_model_entry:
         lines += [
-            f"### Priorytety per model",
+            f"### Model priorities",
             f"",
-            f"- **Najlepsza widoczność:** `{best_model_entry[0].split('/')[-1]}` ({best_model_entry[1]['score']}/100)",
-            f"- **Najgorsza widoczność:** `{worst_model_entry[0].split('/')[-1]}` ({worst_model_entry[1]['score']}/100)",
+            f"- **Best visibility:** `{best_model_entry[0].split('/')[-1]}` ({best_model_entry[1]['score']}/100)",
+            f"- **Worst visibility:** `{worst_model_entry[0].split('/')[-1]}` ({worst_model_entry[1]['score']}/100)",
             f"",
         ]
 
     lines += [
-        f"## Metodologia",
+        f"## Methodology",
         f"",
-        f"- Zapytania: {len(prompts)} pytań × {len(model_scores)} modeli = {len(prompts) * len(model_scores)} kombinacji",
-        f"- Modele odpytywane z web searchem (`:online` suffix OpenRouter)",
-        f"- Mention detection: case-insensitive, z kontekstem ±2 zdania",
-        f"- Sentiment: rule-based (słownik PL+EN), per odpowiedź",
-        f"- Citation detection: dopasowanie domeny w URL-ach anotacji",
+        f"- Queries: {len(prompts)} prompts × {len(model_scores)} models = {len(prompts) * len(model_scores)} combinations",
+        f"- All models queried with web search enabled (`:online` suffix via OpenRouter)",
+        f"- Mention detection: case-insensitive, with ±2 sentence context",
+        f"- Sentiment: rule-based (PL+EN dictionary), per response",
+        f"- Citation detection: domain match in annotation URLs",
         f"- Scoring: 50% mention_rate + 30% citation_rate + 20% position_score",
         f"- API: OpenRouter (https://openrouter.ai)",
         f"",
         f"---",
-        f"*Wygenerowano przez AI Visibility Skill v2 dla Claude Code — {run_date}*",
+        f"*Generated by AI Visibility Skill v2 for Claude Code — {run_date}*",
     ]
 
     return "\n".join(lines)
 
 
 # ─────────────────────────────────────────────
-# MAIN (bez zmian w logice)
+# MAIN
 # ─────────────────────────────────────────────
 
 async def run_audit(
@@ -594,8 +594,8 @@ async def run_audit(
     total = len(models) * len(prompts)
     if verbose:
         print(f"\n🔍 AI Visibility Audit v2 — {brand}")
-        print(f"   Domena: {domain}")
-        print(f"   Modele: {len(models)} | Pytania: {len(prompts)} | Razem: {total} zapytań")
+        print(f"   Domain: {domain}")
+        print(f"   Models: {len(models)} | Prompts: {len(prompts)} | Total: {total} queries")
         print(f"   Keywords: {', '.join(keywords)}\n")
 
     tasks = [
@@ -605,14 +605,14 @@ async def run_audit(
     ]
 
     if verbose:
-        print(f"⏳ Uruchamianie {total} zapytań równolegle...")
+        print(f"⏳ Running {total} queries in parallel...")
 
     all_results = await asyncio.gather(*tasks)
     all_results = list(all_results)
 
     if verbose:
         successful = sum(1 for r in all_results if r["success"])
-        print(f"✅ Zakończono: {successful}/{total} zapytań udanych\n")
+        print(f"✅ Done: {successful}/{total} queries successful\n")
 
     model_scores = {}
     for model in models:
@@ -620,7 +620,7 @@ async def run_audit(
         model_scores[model] = compute_model_score(model_results, keywords)
 
     if verbose:
-        print("📊 Wyniki per model:")
+        print("📊 Results per model:")
         for model, stats in sorted(model_scores.items(), key=lambda x: -x[1]["score"]):
             s_pos = stats.get("sentiment_positive", 0)
             s_neg = stats.get("sentiment_negative", 0)
@@ -647,7 +647,7 @@ async def run_audit(
         f.write(report_md)
 
     if verbose:
-        print(f"📄 Raport markdown: {out_md}")
+        print(f"📄 Markdown report: {out_md}")
 
     output_data = {
         "meta": {
@@ -668,7 +668,7 @@ async def run_audit(
         with open(out_json, "w", encoding="utf-8") as f:
             json.dump(output_data, f, ensure_ascii=False, indent=2)
         if verbose:
-            print(f"📦 Surowe dane JSON: {out_json}")
+            print(f"📦 Raw JSON data: {out_json}")
 
     return output_data
 
@@ -686,7 +686,7 @@ def get_client(api_key: str) -> AsyncOpenAI:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="AI Visibility Check v2 — audyt widoczności marki w modelach AI"
+        description="AI Visibility Check v2 — audit brand visibility across AI models (GEO/AEO)"
     )
     parser.add_argument("--brand", required=True)
     parser.add_argument("--domain", required=True)
@@ -704,7 +704,7 @@ def main():
 
     api_key = args.api_key or os.environ.get("OPENROUTER_API_KEY")
     if not api_key:
-        print("ERROR: Brak OPENROUTER_API_KEY.")
+        print("ERROR: Missing OPENROUTER_API_KEY.")
         sys.exit(1)
 
     keywords = [args.brand]
