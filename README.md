@@ -38,4 +38,3 @@ Built by [@sigmakam](https://github.com/sigmakam) with [Claude Sonnet](https://c
 Prompts, architecture & requirements: sigmakam · Code generation: Claude AI
 ```
 
-**Credits zawsze na dole** — to konwencja w każdym open source repo.
