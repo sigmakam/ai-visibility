@@ -31,6 +31,9 @@ python3 ~/.claude/skills/ai-visibility/scripts/ai_visibility_check.py \
 Generates `{domain}-ai-visibility-YYYY-MM-DD.md` with per-model scoring (0–100),
 mention rate, citation rate, and GEO recommendations.
 
+## Example Output
+See an example output report for McKinsey
+https://docs.google.com/document/d/1Kpc2qq__TjnTUKnth_WfHEztsstuzrcPm9w11Q3OToI/edit?tab=t.0#heading=h.qb3bvtt2ri0f
 ---
 
 ## Credits
