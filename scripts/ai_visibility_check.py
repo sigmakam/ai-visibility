@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-AI Visibility Check v2 — audit brand visibility across AI models (GEO/AEO)
-Queries multiple models in parallel via OpenRouter API.
-Version 2: full responses, mention context, sentiment analysis, position scoring.
+AI Visibility Check v2 — audyt widoczności marki w modelach AI
+Odpytuje wiele modeli równolegle przez OpenRouter API.
+Wersja 2: pełne odpowiedzi, kontekst cytatów, sentiment, pozycja wzmianki.
 
-Usage:
-    python3 ai_visibility_check.py --brand "name" --domain "domain.com"
-    python3 ai_visibility_check.py --brand "name" --domain "domain.com" --lang en
-    python3 ai_visibility_check.py --brand "name" --domain "domain.com" \
-        --prompts "question 1" "question 2"
+Użycie:
+    python3 ai_visibility_check.py --brand "nazwa" --domain "domena.pl"
+    python3 ai_visibility_check.py --brand "nazwa" --domain "domena.pl" --lang pl
+    python3 ai_visibility_check.py --brand "nazwa" --domain "domena.pl" \
+        --prompts "pytanie 1" "pytanie 2"
 """
 
 import os
@@ -23,12 +23,12 @@ from typing import Optional
 try:
     from openai import AsyncOpenAI
 except ImportError:
-    print("ERROR: Missing library openai. Install: pip install openai")
+    print("ERROR: Brak biblioteki openai. Zainstaluj: pip install openai")
     sys.exit(1)
 
 
 # ─────────────────────────────────────────────
-# MODEL CONFIGURATION
+# KONFIGURACJA MODELI
 # ─────────────────────────────────────────────
 
 MODELS = [
@@ -51,10 +51,10 @@ NO_ONLINE_SUFFIX = {
 
 
 # ─────────────────────────────────────────────
-# DEFAULT PROMPTS
+# DOMYŚLNE PYTANIA
 # ─────────────────────────────────────────────
 
-DEFAULT_PROMPTS_PL = [  # Polish default prompts (used with --lang pl)
+DEFAULT_PROMPTS_PL = [
     "Jakie są najlepsze agencje marketingu cyfrowego w Polsce?",
     "Polecane agencje Google Ads dla firm B2B",
     "Najlepsze agencje SEO w Polsce 2025",
@@ -72,11 +72,11 @@ DEFAULT_PROMPTS_EN = [
 
 
 # ─────────────────────────────────────────────
-# SENTIMENT (rule-based, zero cost)
+# SENTIMENT (rule-based, zero kosztów)
 # ─────────────────────────────────────────────
 
 POSITIVE_WORDS = [
-    "poleca", "polecam", "najlepsz", "świetn", "doskonał", "wyróżnia", "lider",  # Polish
+    "poleca", "polecam", "najlepsz", "świetn", "doskonał", "wyróżnia", "lider",
     "ekspert", "zaufan", "skuteczn", "profesjonaln", "renomowa", "award",
     "top", "best", "leading", "excellent", "recommended", "trusted", "proven",
     "specialist", "premier", "award-winning", "outstanding", "innovative",
@@ -89,10 +89,10 @@ NEGATIVE_WORDS = [
 ]
 
 def analyze_sentiment(text: str, keywords: list[str]) -> str:
-    """Simple sentiment: find positive/negative words around keyword mentions."""
+    """Prosty sentiment: szukamy pozytywnych/negatywnych słów w otoczeniu keyword."""
     text_lower = text.lower()
 
-    # Find sentences containing keyword
+    # Znajdź zdania zawierające keyword
     sentences = re.split(r'(?<=[.!?])\s+', text)
     relevant_sentences = []
     for sent in sentences:
@@ -101,32 +101,32 @@ def analyze_sentiment(text: str, keywords: list[str]) -> str:
             relevant_sentences.append(sent_lower)
 
     if not relevant_sentences:
-        return "neutral"
+        return "neutralny"
 
     context = " ".join(relevant_sentences)
     pos = sum(1 for w in POSITIVE_WORDS if w in context)
     neg = sum(1 for w in NEGATIVE_WORDS if w in context)
 
     if pos > neg:
-        return "positive"
+        return "pozytywny"
     elif neg > pos:
-        return "negative"
+        return "negatywny"
     else:
-        return "neutral"
+        return "neutralny"
 
 
 def sentiment_emoji(sentiment: str) -> str:
-    return {"positive": "😊", "negative": "😟", "neutral": "😐"}.get(sentiment, "😐")
+    return {"pozytywny": "😊", "negatywny": "😟", "neutralny": "😐"}.get(sentiment, "😐")
 
 
 # ─────────────────────────────────────────────
-# MENTION CONTEXT EXTRACTION
+# WYCIĄGANIE KONTEKSTU WZMIANKI
 # ─────────────────────────────────────────────
 
 def extract_mention_contexts(content: str, keywords: list[str], context_sentences: int = 2) -> list[dict]:
     """
-    For each keyword return all occurrences with surrounding sentences.
-    Returns list of dict: {keyword, excerpt, sentence_index, total_sentences}
+    Dla każdego keyword zwróć wszystkie wystąpienia z otaczającymi zdaniami.
+    Zwraca listę dict: {keyword, excerpt, sentence_index, total_sentences}
     """
     sentences = re.split(r'(?<=[.!?\n])\s+', content.strip())
     sentences = [s.strip() for s in sentences if s.strip()]
@@ -152,7 +152,7 @@ def extract_mention_contexts(content: str, keywords: list[str], context_sentence
 
 
 def check_mentions(content: str, keywords: list[str]) -> dict:
-    """Check how many times and where keywords appear, including context."""
+    """Sprawdź ile razy i gdzie pojawiają się keywords + konteksty."""
     content_lower = content.lower()
     results = {}
     for kw in keywords:
@@ -190,7 +190,7 @@ def check_citations(annotations: list, domains: list[str]) -> list[dict]:
 
 
 # ─────────────────────────────────────────────
-# MODEL QUERY
+# ZAPYTANIE DO MODELU
 # ─────────────────────────────────────────────
 
 async def query_model(
@@ -200,20 +200,37 @@ async def query_model(
     keywords: list[str],
     domains: list[str],
     semaphore: asyncio.Semaphore,
+    location: Optional[str] = None,
 ) -> dict:
     model_id = model if model in NO_ONLINE_SUFFIX else f"{model}:online"
     result = {
         "model": model,
         "prompt": prompt,
+        "location": location,
         "success": False,
         "content": "",
         "mentions": {},
         "mention_contexts": [],
-        "sentiment": "neutral",
+        "sentiment": "neutralny",
         "citations": [],
         "error": None,
         "tokens": 0,
     }
+
+    # Buduj messages z opcjonalną lokalizacją
+    messages = []
+    if location:
+        messages.append({
+            "role": "system",
+            "content": (
+                f"You are a helpful assistant. "
+                f"The user is located in {location}. "
+                f"Provide answers relevant to this location and local context."
+            )
+        })
+    # Dodaj lokalizację też do pytania dla pewności
+    user_prompt = f"{prompt} (location: {location})" if location else prompt
+    messages.append({"role": "user", "content": user_prompt})
 
     async with semaphore:
         try:
@@ -222,13 +239,13 @@ async def query_model(
                     model=model_id,
                     stream=False,
                     max_tokens=1500,
-                    messages=[{"role": "user", "content": prompt}],
+                    messages=messages,
                 ),
                 timeout=45.0,
             )
 
             content = completion.choices[0].message.content or ""
-            result["content"] = content  # full text, no truncation
+            result["content"] = content  # pełny tekst, bez obcinania
             result["success"] = True
             result["tokens"] = (
                 completion.usage.total_tokens if completion.usage else 0
@@ -236,7 +253,7 @@ async def query_model(
 
             result["mentions"] = check_mentions(content, keywords)
 
-            # All mention contexts (flat list)
+            # Konteksty wszystkich wzmianek (płasko)
             all_contexts = []
             for kw_data in result["mentions"].values():
                 all_contexts.extend(kw_data.get("contexts", []))
@@ -278,8 +295,8 @@ def compute_model_score(results_for_model: list[dict], keywords: list[str]) -> d
 
     # Sentiment summary
     sentiments = [r["sentiment"] for r in successful if r["mentions"]]
-    pos_count = sentiments.count("positive")
-    neg_count = sentiments.count("negative")
+    pos_count = sentiments.count("pozytywny")
+    neg_count = sentiments.count("negatywny")
 
     mention_rate = with_mention / len(successful)
     citation_rate = with_citation / len(successful)
@@ -310,17 +327,17 @@ def compute_model_score(results_for_model: list[dict], keywords: list[str]) -> d
 
 def score_to_status(score: float) -> str:
     if score >= 80:
-        return "🟢 Strong"
+        return "🟢 Silna"
     elif score >= 50:
-        return "🟡 Moderate"
+        return "🟡 Umiarkowana"
     elif score >= 20:
-        return "🟠 Weak"
+        return "🟠 Słaba"
     else:
-        return "🔴 Invisible"
+        return "🔴 Niewidoczna"
 
 
 # ─────────────────────────────────────────────
-# MARKDOWN REPORT GENERATION
+# GENEROWANIE RAPORTU MARKDOWN
 # ─────────────────────────────────────────────
 
 def generate_report(
@@ -332,101 +349,146 @@ def generate_report(
     all_results: list[dict],
     model_scores: dict,
     run_date: str,
+    locations: list[str] = None,
 ) -> str:
     lines = []
+    locations = locations or [None]
+    multi_location = len(locations) > 1 or (len(locations) == 1 and locations[0] is not None)
+
+    # Remap scoring keys for single-location mode (keys are "model||None" → "model")
+    if not multi_location:
+        remapped = {}
+        for key, val in model_scores.items():
+            clean_key = key.split("||")[0]
+            remapped[clean_key] = val
+        model_scores = remapped
 
     lines += [
         f"# Raport AI Visibility — {brand}",
         f"",
-        f"**Date:** {run_date}  ",
-        f"**Domain:** {domain}  ",
+        f"**Data:** {run_date}  ",
+        f"**Domena:** {domain}  ",
         f"**Keywords:** {', '.join(keywords)}  ",
-        f"**Models:** {len(model_scores)}  ",
-        f"**Prompts:** {len(prompts)}  ",
-        f"",
+        f"**Modele:** {len(set(r['model'] for r in all_results))}  ",
+        f"**Pytania:** {len(prompts)}  ",
     ]
+    if multi_location:
+        lines.append(f"**Lokalizacje:** {', '.join(str(l) for l in locations)}  ")
+    lines.append("")
 
+    # ── EXECUTIVE SUMMARY ────────────────────────────────────────────────
     all_scores = [v["score"] for v in model_scores.values()]
     overall = round(sum(all_scores) / len(all_scores), 1) if all_scores else 0
 
-    # Global sentiment
     all_sentiments = [r["sentiment"] for r in all_results if r["success"] and r["mentions"]]
     total_s = len(all_sentiments)
-    pos_pct = round(all_sentiments.count("positive") / total_s * 100) if total_s else 0
-    neg_pct = round(all_sentiments.count("negative") / total_s * 100) if total_s else 0
+    pos_pct = round(all_sentiments.count("pozytywny") / total_s * 100) if total_s else 0
+    neg_pct = round(all_sentiments.count("negatywny") / total_s * 100) if total_s else 0
     neu_pct = 100 - pos_pct - neg_pct
 
-    lines += [
-        f"## Executive Summary",
-        f"",
-        f"**Overall AI Visibility Score: {overall}/100** — {score_to_status(overall)}",
-        f"",
-    ]
+    lines += [f"## Executive Summary", f"",
+              f"**Overall AI Visibility Score: {overall}/100** — {score_to_status(overall)}", f""]
 
     if overall >= 80:
-        lines.append(f"Brand **{brand}** has strong visibility across the AI ecosystem.")
+        lines.append(f"Marka **{brand}** jest dobrze widoczna w ekosystemie AI.")
     elif overall >= 50:
-        lines.append(f"Brand **{brand}** has moderate visibility — appears in some responses but lacks dominance.")
+        lines.append(f"Marka **{brand}** ma umiarkowaną widoczność — pojawia się w części odpowiedzi.")
     elif overall >= 20:
-        lines.append(f"Brand **{brand}** has weak AI visibility. An active GEO strategy is required.")
+        lines.append(f"Marka **{brand}** jest słabo widoczna w AI. Wymagana strategia GEO.")
     else:
-        lines.append(f"Brand **{brand}** is virtually absent from AI model responses. Critical GEO intervention needed.")
+        lines.append(f"Marka **{brand}** praktycznie nie istnieje w odpowiedziach modeli AI.")
 
     if total_s > 0:
+        lines += [f"",
+                  f"**Sentiment wzmianek:** 😊 {pos_pct}% pozytywny · 😐 {neu_pct}% neutralny · 😟 {neg_pct}% negatywny  ",
+                  f"*(na podstawie {total_s} odpowiedzi z wzmianką)*"]
+    lines.append("")
+
+    # ── SCORE PER MODEL (z kolumnami lokalizacji jeśli multi) ────────────
+    lines += [f"## Wyniki per model", f""]
+
+    if multi_location:
+        loc_headers = " | ".join(f"Score {l}" for l in locations)
+        loc_sep = " | ".join("---" for _ in locations)
         lines += [
-            f"",
-            f"**Mention sentiment:** 😊 {pos_pct}% positive · 😐 {neu_pct}% neutral · 😟 {neg_pct}% negative  ",
-            f"*(based on {total_s} responses with mentions)*",
+            f"| Model | {loc_headers} | Avg Score | Sentiment |",
+            f"|---| {loc_sep} |---|---|",
         ]
-
+        for model in MODELS:
+            model_short = model.split("/")[-1]
+            scores_per_loc = []
+            for loc in locations:
+                key = f"{model}||{loc}"
+                s = model_scores.get(key, {}).get("score", "—")
+                scores_per_loc.append(f"**{s}**" if s != "—" else "—")
+            # avg across locations
+            avg_vals = [model_scores.get(f"{model}||{loc}", {}).get("score", 0) for loc in locations]
+            avg_score = round(sum(avg_vals) / len(avg_vals), 1)
+            # sentiment sum
+            s_pos = sum(model_scores.get(f"{model}||{loc}", {}).get("sentiment_positive", 0) for loc in locations)
+            s_neg = sum(model_scores.get(f"{model}||{loc}", {}).get("sentiment_negative", 0) for loc in locations)
+            s_neu = sum(model_scores.get(f"{model}||{loc}", {}).get("sentiment_neutral", 0) for loc in locations)
+            loc_cells = " | ".join(scores_per_loc)
+            lines.append(f"| `{model_short}` | {loc_cells} | {avg_score} | 😊{s_pos} 😐{s_neu} 😟{s_neg} |")
+    else:
+        lines += [
+            f"| Model | Score | Status | Mention Rate | Citation Rate | Avg Mentions | Sentiment |",
+            f"|---|---|---|---|---|---|---|",
+        ]
+        for model, stats in sorted(model_scores.items(), key=lambda x: -x[1]["score"]):
+            model_short = model.split("/")[-1]
+            s_pos = stats.get("sentiment_positive", 0)
+            s_neg = stats.get("sentiment_negative", 0)
+            s_neu = stats.get("sentiment_neutral", 0)
+            lines.append(
+                f"| `{model_short}` | **{stats['score']}** | {score_to_status(stats['score'])} "
+                f"| {stats['mention_rate']}% | {stats['citation_rate']}% | {stats['avg_mentions']} | 😊{s_pos} 😐{s_neu} 😟{s_neg} |"
+            )
     lines.append("")
 
-    # Results table per model
-    lines += [
-        f"## Results per model",
-        f"",
-        f"| Model | Score | Status | Mention Rate | Citation Rate | Avg Mentions | Sentiment |",
-        f"|---|---|---|---|---|---|---|",
-    ]
-    for model, stats in sorted(model_scores.items(), key=lambda x: -x[1]["score"]):
-        model_short = model.split("/")[-1]
-        s_pos = stats.get("sentiment_positive", 0)
-        s_neg = stats.get("sentiment_negative", 0)
-        s_neu = stats.get("sentiment_neutral", 0)
-        sentiment_str = f"😊{s_pos} 😐{s_neu} 😟{s_neg}"
-        lines.append(
-            f"| `{model_short}` | **{stats['score']}** | {score_to_status(stats['score'])} "
-            f"| {stats['mention_rate']}% | {stats['citation_rate']}% | {stats['avg_mentions']} | {sentiment_str} |"
-        )
+    # ── SCORE PER PYTANIE ────────────────────────────────────────────────
+    lines += [f"## Wyniki per pytanie", f""]
+    if multi_location:
+        loc_headers = " | ".join(f"Wzmianki {l}" for l in locations)
+        loc_sep = " | ".join("---" for _ in locations)
+        lines += [
+            f"| Pytanie | {loc_headers} |",
+            f"|---| {loc_sep} |",
+        ]
+        for prompt in prompts:
+            cells = []
+            for loc in locations:
+                pr = [r for r in all_results if r["prompt"] == prompt and r.get("location") == loc and r["success"]]
+                with_m = sum(1 for r in pr if r["mentions"])
+                total_m = len(pr)
+                cells.append(f"{with_m}/{total_m}")
+            prompt_short = prompt[:55] + ("..." if len(prompt) > 55 else "")
+            lines.append(f"| {prompt_short} | {' | '.join(cells)} |")
+    else:
+        lines += [
+            f"| Pytanie | Modele z wzmianką | Modele z cytowaniem | Sentiment |",
+            f"|---|---|---|---|",
+        ]
+        for prompt in prompts:
+            pr = [r for r in all_results if r["prompt"] == prompt and r["success"]]
+            with_m = sum(1 for r in pr if r["mentions"])
+            with_c = sum(1 for r in pr if r["citations"])
+            total_m = len(pr)
+            sents = [r["sentiment"] for r in pr if r["mentions"]]
+            if sents:
+                dominant = max(set(sents), key=sents.count)
+                sent_str = f"{sentiment_emoji(dominant)} {dominant}"
+            else:
+                sent_str = "—"
+            prompt_short = prompt[:60] + ("..." if len(prompt) > 60 else "")
+            lines.append(f"| {prompt_short} | {with_m}/{total_m} | {with_c}/{total_m} | {sent_str} |")
     lines.append("")
 
-    # Results table per prompt
+    # ── GŁÓWNA SEKCJA: per model → per pytanie → per lokalizacja ─────────
     lines += [
-        f"## Results per prompt",
+        f"## Pełne odpowiedzi modeli",
         f"",
-        f"| Prompt | Models with mention | Models with citation | Sentiment |",
-        f"|---|---|---|---|",
-    ]
-    for prompt in prompts:
-        prompt_results = [r for r in all_results if r["prompt"] == prompt and r["success"]]
-        with_m = sum(1 for r in prompt_results if r["mentions"])
-        with_c = sum(1 for r in prompt_results if r["citations"])
-        total_m = len(prompt_results)
-        sentiments_p = [r["sentiment"] for r in prompt_results if r["mentions"]]
-        if sentiments_p:
-            dominant = max(set(sentiments_p), key=sentiments_p.count)
-            sent_str = f"{sentiment_emoji(dominant)} {dominant}"
-        else:
-            sent_str = "—"
-        prompt_short = prompt[:60] + ("..." if len(prompt) > 60 else "")
-        lines.append(f"| {prompt_short} | {with_m}/{total_m} | {with_c}/{total_m} | {sent_str} |")
-    lines.append("")
-
-    # ── MAIN SECTION: full responses per model ─────────────────────────
-    lines += [
-        f"## Full model responses",
-        f"",
-        f"> All responses with brand mentions. Excerpt context highlighted.",
+        f"> Struktura: Model → Pytanie → odpowiedzi per lokalizacja.",
         f"",
     ]
 
@@ -436,78 +498,131 @@ def generate_report(
             continue
 
         model_short = model.split("/")[-1]
-        stats = model_scores.get(model, {})
-        lines += [
-            f"### `{model_short}` — score {stats.get('score', 0)}/100",
-            f"",
-        ]
+        if multi_location:
+            avg_score = round(
+                sum(model_scores.get(f"{model}||{loc}", {}).get("score", 0) for loc in locations) / len(locations), 1
+            )
+            lines += [f"### `{model_short}` — avg score {avg_score}/100", f""]
+        else:
+            stats = model_scores.get(model, {})
+            lines += [f"### `{model_short}` — score {stats.get('score', 0)}/100", f""]
 
-        for r in model_results:
-            has_mention = bool(r["mentions"])
-            sentiment = r.get("sentiment", "neutral")
-            prompt_short = r["prompt"][:80]
+        for prompt in prompts:
+            prompt_short = prompt[:80]
+            lines += [f"#### 💬 {prompt_short}", f""]
 
-            lines += [
-                f"**Prompt:** {prompt_short}  ",
-                f"**Mention:** {'✅ YES' if has_mention else '❌ NO'} | "
-                f"**URL citation:** {'✅ YES' if r['citations'] else '❌ NO'} | "
-                f"**Sentiment:** {sentiment_emoji(sentiment)} {sentiment}",
-                f"",
-            ]
-
-            # Mention contexts (all occurrences)
-            if r["mention_contexts"]:
-                lines.append(f"**Mention excerpts** *(±2 sentence context)*:")
+            if multi_location:
+                # Tabela porównawcza lokalizacji
+                lines += [
+                    f"| Lokalizacja | Wzmianka | Cytat URL | Sentiment | Fragment |",
+                    f"|---|---|---|---|---|",
+                ]
+                for loc in locations:
+                    r = next(
+                        (x for x in all_results if x["model"] == model
+                         and x["prompt"] == prompt
+                         and x.get("location") == loc
+                         and x["success"]),
+                        None
+                    )
+                    if not r:
+                        lines.append(f"| {loc} | ❓ | ❓ | — | *brak danych* |")
+                        continue
+                    has_m = bool(r["mentions"])
+                    has_c = bool(r["citations"])
+                    sent = sentiment_emoji(r.get("sentiment", "neutralny"))
+                    # Pierwszy cytat (skrócony)
+                    fragment = "—"
+                    if r["mention_contexts"]:
+                        raw = r["mention_contexts"][0]["excerpt"]
+                        fragment = raw[:120].replace("|", "\\|") + ("..." if len(raw) > 120 else "")
+                    lines.append(
+                        f"| **{loc}** | {'✅' if has_m else '❌'} | {'✅' if has_c else '❌'} | {sent} | {fragment} |"
+                    )
                 lines.append("")
-                for ctx in r["mention_contexts"]:
-                    pos_label = f"pozycja ~{ctx['position_pct']}% tekstu"
+
+                # Pełne odpowiedzi per lokalizacja (zwinięte)
+                for loc in locations:
+                    r = next(
+                        (x for x in all_results if x["model"] == model
+                         and x["prompt"] == prompt
+                         and x.get("location") == loc
+                         and x["success"]),
+                        None
+                    )
+                    if not r:
+                        continue
                     lines += [
-                        f"> {ctx['excerpt']}",
-                        f"  *(keyword: `{ctx['keyword']}` · {pos_label})*",
+                        f"<details>",
+                        f"<summary>📄 Pełna odpowiedź — {loc} ({len(r['content'])} znaków)</summary>",
+                        f"",
+                        f"```",
+                        r["content"],
+                        f"```",
+                        f"",
+                        f"</details>",
                         f"",
                     ]
-
-            # Full response (collapsed via HTML details)
-            lines += [
-                f"<details>",
-                f"<summary>📄 Full response ({len(r['content'])} characters)</summary>",
-                f"",
-                f"```",
-                r["content"],
-                f"```",
-                f"",
-                f"</details>",
-                f"",
-            ]
-
-            # Cytowane URL-e
-            if r["citations"]:
-                lines.append(f"**Cited URLs:**")
-                for c in r["citations"]:
-                    lines.append(f"- {c['url']}")
-                lines.append("")
+            else:
+                # Tryb bez lokalizacji — stary układ
+                r = next(
+                    (x for x in all_results if x["model"] == model
+                     and x["prompt"] == prompt
+                     and x["success"]),
+                    None
+                )
+                if not r:
+                    continue
+                has_mention = bool(r["mentions"])
+                sentiment = r.get("sentiment", "neutralny")
+                lines += [
+                    f"**Wzmianka:** {'✅ TAK' if has_mention else '❌ NIE'} | "
+                    f"**Cytat URL:** {'✅ TAK' if r['citations'] else '❌ NIE'} | "
+                    f"**Sentiment:** {sentiment_emoji(sentiment)} {sentiment}",
+                    f"",
+                ]
+                if r["mention_contexts"]:
+                    lines.append(f"**Cytaty z odpowiedzi** *(kontekst ±2 zdania)*:")
+                    lines.append("")
+                    for ctx in r["mention_contexts"]:
+                        lines += [
+                            f"> {ctx['excerpt']}",
+                            f"  *(keyword: `{ctx['keyword']}` · pozycja ~{ctx['position_pct']}% tekstu)*",
+                            f"",
+                        ]
+                lines += [
+                    f"<details>",
+                    f"<summary>📄 Pełna odpowiedź ({len(r['content'])} znaków)</summary>",
+                    f"",
+                    f"```",
+                    r["content"],
+                    f"```",
+                    f"",
+                    f"</details>",
+                    f"",
+                ]
+                if r["citations"]:
+                    lines.append(f"**Cytowane URL-e:**")
+                    for c in r["citations"]:
+                        lines.append(f"- {c['url']}")
+                    lines.append("")
 
             lines.append("---")
             lines.append("")
 
-    # Most cited URLs
-    all_citations = []
-    for r in all_results:
-        for c in r.get("citations", []):
-            all_citations.append(c["url"])
-
+    # ── NAJCZĘSTSZE CYTOWANIA ─────────────────────────────────────────────
+    from collections import Counter
+    all_citations = [c["url"] for r in all_results for c in r.get("citations", [])]
     if all_citations:
-        from collections import Counter
-        top_urls = Counter(all_citations).most_common(10)
-        lines += [f"## Most cited URLs", f""]
-        for url, count in top_urls:
+        lines += [f"## Najczęściej cytowane URL-e", f""]
+        for url, count in Counter(all_citations).most_common(10):
             lines.append(f"- `{url}` ({count}x)")
         lines.append("")
 
-    # Errors
+    # ── BŁĘDY ─────────────────────────────────────────────────────────────
     failed = [r for r in all_results if not r["success"]]
     if failed:
-        lines += [f"## Errors (unavailable models)", f""]
+        lines += [f"## Błędy (modele niedostępne)", f""]
         errors_by_model: dict = {}
         for r in failed:
             errors_by_model.setdefault(r["model"], r["error"])
@@ -515,64 +630,52 @@ def generate_report(
             lines.append(f"- `{model}`: {err}")
         lines.append("")
 
-    # GEO Recommendations
-    lines += [f"## GEO Recommendations", f""]
-
+    # ── REKOMENDACJE GEO ──────────────────────────────────────────────────
+    lines += [f"## Rekomendacje GEO", f""]
     if overall < 50:
         lines += [
-            f"### 🔴 Urgent actions",
-            f"",
-            f"1. **Answer-focused content** — create content that directly answers questions AI models receive from users",
-            f"2. **Wikipedia / Wikidata** — one of the most cited sources by LLMs",
-            f"3. **LinkedIn / company profiles** — trusted sources indexed by AI models",
-            f"4. **Reviews and case studies** — G2, Clutch, Trustpilot",
+            f"### 🔴 Pilne działania", f"",
+            f"1. **Treści odpowiadające na pytania** — content bezpośrednio pod pytania które modele AI dostają",
+            f"2. **Wikipedia / Wikidata** — jedno z najczęściej cytowanych źródeł przez LLM",
+            f"3. **LinkedIn / firmowe profile** — wiarygodne źródła indeksowane przez modele",
+            f"4. **Recenzje i case studies** — G2, Clutch, Trustpilot",
             f"5. **Schema markup** — FAQPage, Organization, breadcrumbs",
             f"",
         ]
     else:
         lines += [
-            f"### 🟡 Optimization",
-            f"",
-            f"1. **Expand topic coverage** — target queries where your brand has no mentions yet",
-            f"2. **Build citations** — publish data, statistics, and industry reports",
-            f"3. **Reddit / Quora / forums** — authentic engagement in niche discussions",
-            f"4. **robots.txt** — ensure you are not blocking GPTBot/ClaudeBot/PerplexityBot",
-            f"5. **Monthly monitoring** — run audits regularly to track progress",
-            f"",
-        ]
-
-    best_model_entry = max(model_scores.items(), key=lambda x: x[1]["score"]) if model_scores else None
-    worst_model_entry = min(model_scores.items(), key=lambda x: x[1]["score"]) if model_scores else None
-
-    if best_model_entry and worst_model_entry:
-        lines += [
-            f"### Model priorities",
-            f"",
-            f"- **Best visibility:** `{best_model_entry[0].split('/')[-1]}` ({best_model_entry[1]['score']}/100)",
-            f"- **Worst visibility:** `{worst_model_entry[0].split('/')[-1]}` ({worst_model_entry[1]['score']}/100)",
+            f"### 🟡 Optymalizacja", f"",
+            f"1. **Zwiększ pokrycie tematyczne** — odpowiadaj na pytania gdzie nie ma jeszcze wzmianki",
+            f"2. **Buduj cytowania** — publikuj dane, statystyki, raporty branżowe",
+            f"3. **Reddit / Quora / fora** — autentyczne zaangażowanie w dyskusje",
+            f"4. **robots.txt** — sprawdź czy nie blokujesz GPTBot/ClaudeBot/PerplexityBot",
+            f"5. **Monitoring miesięczny** — uruchamiaj audyt regularnie",
             f"",
         ]
 
+    # ── METODOLOGIA ───────────────────────────────────────────────────────
+    total_queries = len(prompts) * len(set(r["model"] for r in all_results)) * len(locations)
     lines += [
-        f"## Methodology",
-        f"",
-        f"- Queries: {len(prompts)} prompts × {len(model_scores)} models = {len(prompts) * len(model_scores)} combinations",
-        f"- All models queried with web search enabled (`:online` suffix via OpenRouter)",
-        f"- Mention detection: case-insensitive, with ±2 sentence context",
-        f"- Sentiment: rule-based (PL+EN dictionary), per response",
-        f"- Citation detection: domain match in annotation URLs",
+        f"## Metodologia", f"",
+        f"- Zapytania: {len(prompts)} pytań × {len(set(r['model'] for r in all_results))} modeli"
+        + (f" × {len(locations)} lokalizacje = {total_queries} kombinacji" if multi_location else f" = {len(prompts) * len(set(r['model'] for r in all_results))} kombinacji"),
+        f"- Lokalizacja symulowana przez system prompt + sufiks pytania",
+        f"- Modele odpytywane z web searchem (`:online` suffix OpenRouter)",
+        f"- Mention detection: case-insensitive, z kontekstem ±2 zdania",
+        f"- Sentiment: rule-based (słownik PL+EN), per odpowiedź",
+        f"- Citation detection: dopasowanie domeny w URL-ach anotacji",
         f"- Scoring: 50% mention_rate + 30% citation_rate + 20% position_score",
         f"- API: OpenRouter (https://openrouter.ai)",
         f"",
         f"---",
-        f"*Generated by AI Visibility Skill v2 for Claude Code — {run_date}*",
+        f"*Wygenerowano przez AI Visibility Skill v2.1 dla Claude Code — {run_date}*",
     ]
 
     return "\n".join(lines)
 
 
 # ─────────────────────────────────────────────
-# MAIN
+# MAIN (bez zmian w logice)
 # ─────────────────────────────────────────────
 
 async def run_audit(
@@ -583,6 +686,7 @@ async def run_audit(
     prompts: list[str],
     models: list[str],
     api_key: str,
+    locations: list[str] = None,
     out_json: Optional[str] = None,
     out_md: Optional[str] = None,
     verbose: bool = True,
@@ -590,52 +694,56 @@ async def run_audit(
     client = get_client(api_key)
     run_date = datetime.now().strftime("%Y-%m-%d %H:%M")
     semaphore = asyncio.Semaphore(8)
+    locations = locations or [None]
 
-    total = len(models) * len(prompts)
+    total = len(models) * len(prompts) * len(locations)
     if verbose:
-        print(f"\n🔍 AI Visibility Audit v2 — {brand}")
-        print(f"   Domain: {domain}")
-        print(f"   Models: {len(models)} | Prompts: {len(prompts)} | Total: {total} queries")
+        print(f"\n🔍 AI Visibility Audit v2.1 — {brand}")
+        print(f"   Domena: {domain}")
+        if any(l for l in locations):
+            print(f"   Lokalizacje: {', '.join(str(l) for l in locations)}")
+        print(f"   Modele: {len(models)} | Pytania: {len(prompts)} | Lokalizacje: {len(locations)} | Razem: {total} zapytań")
         print(f"   Keywords: {', '.join(keywords)}\n")
 
     tasks = [
-        query_model(client, model, prompt, keywords, domains, semaphore)
+        query_model(client, model, prompt, keywords, domains, semaphore, location)
         for model in models
         for prompt in prompts
+        for location in locations
     ]
 
     if verbose:
-        print(f"⏳ Running {total} queries in parallel...")
+        print(f"⏳ Uruchamianie {total} zapytań równolegle...")
 
     all_results = await asyncio.gather(*tasks)
     all_results = list(all_results)
 
     if verbose:
         successful = sum(1 for r in all_results if r["success"])
-        print(f"✅ Done: {successful}/{total} queries successful\n")
+        print(f"✅ Zakończono: {successful}/{total} zapytań udanych\n")
 
+    # Scoring per model+location (klucz: "model||location")
     model_scores = {}
     for model in models:
-        model_results = [r for r in all_results if r["model"] == model]
-        model_scores[model] = compute_model_score(model_results, keywords)
+        for loc in locations:
+            key = f"{model}||{loc}"
+            loc_results = [r for r in all_results if r["model"] == model and r.get("location") == loc]
+            model_scores[key] = compute_model_score(loc_results, keywords)
 
     if verbose:
-        print("📊 Results per model:")
-        for model, stats in sorted(model_scores.items(), key=lambda x: -x[1]["score"]):
-            s_pos = stats.get("sentiment_positive", 0)
-            s_neg = stats.get("sentiment_negative", 0)
-            print(
-                f"   {model.split('/')[-1]:30s} "
-                f"score={stats['score']:5.1f}  "
-                f"mentions={stats['mention_rate']:5.1f}%  "
-                f"citations={stats['citation_rate']:5.1f}%  "
-                f"sentiment=😊{s_pos}😟{s_neg}"
-            )
+        print("📊 Wyniki per model:")
+        for model in models:
+            model_short = model.split("/")[-1]
+            scores = [model_scores.get(f"{model}||{loc}", {}).get("score", 0) for loc in locations]
+            avg = round(sum(scores) / len(scores), 1)
+            loc_str = "  ".join(f"{str(loc)[:12]}={s}" for loc, s in zip(locations, scores)) if len(locations) > 1 else f"score={scores[0]}"
+            print(f"   {model_short:30s} avg={avg:5.1f}  {loc_str}")
         print()
 
     report_md = generate_report(
         brand, domain, keywords, domains, prompts,
-        all_results, model_scores, run_date
+        all_results, model_scores, run_date,
+        locations=locations,
     )
 
     if out_md is None:
@@ -647,7 +755,7 @@ async def run_audit(
         f.write(report_md)
 
     if verbose:
-        print(f"📄 Markdown report: {out_md}")
+        print(f"📄 Raport markdown: {out_md}")
 
     output_data = {
         "meta": {
@@ -657,8 +765,9 @@ async def run_audit(
             "domains": domains,
             "prompts": prompts,
             "models": models,
+            "locations": locations,
             "run_date": run_date,
-            "version": "2.0",
+            "version": "2.1",
         },
         "model_scores": model_scores,
         "results": all_results,
@@ -668,7 +777,7 @@ async def run_audit(
         with open(out_json, "w", encoding="utf-8") as f:
             json.dump(output_data, f, ensure_ascii=False, indent=2)
         if verbose:
-            print(f"📦 Raw JSON data: {out_json}")
+            print(f"📦 Surowe dane JSON: {out_json}")
 
     return output_data
 
@@ -686,7 +795,7 @@ def get_client(api_key: str) -> AsyncOpenAI:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="AI Visibility Check v2 — audit brand visibility across AI models (GEO/AEO)"
+        description="AI Visibility Check v2 — audyt widoczności marki w modelach AI"
     )
     parser.add_argument("--brand", required=True)
     parser.add_argument("--domain", required=True)
@@ -698,13 +807,14 @@ def main():
     parser.add_argument("--out")
     parser.add_argument("--out-json")
     parser.add_argument("--api-key")
+    parser.add_argument("--locations", nargs="+", help="Lokalizacje, np. 'Wroclaw, Poland' 'Warsaw, Poland' 'Berlin, Germany'")
     parser.add_argument("--quiet", action="store_true")
 
     args = parser.parse_args()
 
     api_key = args.api_key or os.environ.get("OPENROUTER_API_KEY")
     if not api_key:
-        print("ERROR: Missing OPENROUTER_API_KEY.")
+        print("ERROR: Brak OPENROUTER_API_KEY.")
         sys.exit(1)
 
     keywords = [args.brand]
@@ -731,6 +841,7 @@ def main():
             prompts=prompts,
             models=models,
             api_key=api_key,
+            locations=args.locations,
             out_json=args.out_json,
             out_md=args.out,
             verbose=not args.quiet,
